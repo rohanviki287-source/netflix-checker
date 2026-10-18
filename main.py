@@ -286,6 +286,57 @@ def check():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+from bs4 import BeautifulSoup
+
+@app.route("/scrape", methods=["GET"])
+def scrape():
+    cookie_raw = request.args.get("cookie", "")
+    if not cookie_raw:
+        return jsonify({"error": "No cookie provided"}), 400
+    try:
+        cookie_dict = extract_cookie_dict(cookie_raw)
+        token, expires = fetch_nftoken(cookie_dict)
+
+        # Open Netflix account page with token
+        account_url = "https://www.netflix.com/account?nftoken=" + token
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+        response = requests.get(account_url, headers=headers, timeout=30, verify=False, allow_redirects=True)
+        
+        # Get page source
+        html = response.text
+        
+        # Try to find Netflix's state JSON in page
+        match = re.search(r'netflix\.reactContext\s*=\s*({.*?});', html, re.DOTALL)
+        if not match:
+            match = re.search(r'window\.netflix\s*=\s*window\.netflix\s*\|\|\s*{}\s*;.*?netflix\.contextData\s*=\s*({.*?});', html, re.DOTALL)
+
+        if match:
+            try:
+                state = json.loads(match.group(1))
+                return jsonify({"found": True, "data": state})
+            except:
+                pass
+
+        # Return raw HTML length and title for debugging
+        soup = BeautifulSoup(html, "html.parser")
+        title = soup.title.string if soup.title else "No title"
+        
+        return jsonify({
+            "title": title,
+            "url": response.url,
+            "html_length": len(html),
+            "found_state": False
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
