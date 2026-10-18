@@ -49,7 +49,7 @@ CHECK_PARAMS = {
     "model": "saget",
     "modelType": "IPHONE8-1",
     "odpAware": "true",
-    "path": '["account","membershipStatus","userInfo","countryOfSignup","memberSince","currentMembership","userBillingInfo","profiles"]',
+    "path": '["account","membershipStatus","userInfo","countryOfSignup","memberSince","currentMembership","userBillingInfo","profiles","emailVerified"]',
     "pathFormat": "graph",
     "pixelDensity": "2.0",
     "progressive": "false",
@@ -95,6 +95,8 @@ COUNTRY_FLAGS = {
     "NO": "🇳🇴", "DK": "🇩🇰", "FI": "🇫🇮", "PL": "🇵🇱", "TR": "🇹🇷",
     "AR": "🇦🇷", "CO": "🇨🇴", "CL": "🇨🇱", "PH": "🇵🇭", "ID": "🇮🇩",
     "TH": "🇹🇭", "MY": "🇲🇾", "SG": "🇸🇬", "PK": "🇵🇰", "BD": "🇧🇩",
+    "NG": "🇳🇬", "ZA": "🇿🇦", "EG": "🇪🇬", "SA": "🇸🇦", "AE": "🇦🇪",
+    "PT": "🇵🇹", "RO": "🇷🇴", "CZ": "🇨🇿", "HU": "🇭🇺", "GR": "🇬🇷",
 }
 
 def decode_value(value):
@@ -146,10 +148,14 @@ def fetch_nftoken(cookie_dict):
 
 def fetch_account_info(cookie_dict):
     netflix_id = cookie_dict.get("NetflixId")
+    secure_id = cookie_dict.get("SecureNetflixId", "")
     if not netflix_id:
         raise ValueError("Missing NetflixId in cookie")
     headers = dict(BASE_HEADERS)
-    headers["Cookie"] = f"NetflixId={netflix_id}"
+    cookie_str = f"NetflixId={netflix_id}"
+    if secure_id:
+        cookie_str += f"; SecureNetflixId={secure_id}"
+    headers["Cookie"] = cookie_str
     response = requests.get(CHECK_URL, params=CHECK_PARAMS, headers=headers, timeout=30, verify=False)
     response.raise_for_status()
     return response.json()
@@ -187,31 +193,35 @@ def check():
         data = fetch_account_info(cookie_dict)
         token, expires = fetch_nftoken(cookie_dict)
 
+        print("RAW DATA:", json.dumps(data, indent=2))
+
         account = (data.get("value") or {}).get("account") or {}
-        membership = account.get("membershipStatus") or {}
-        user_info = account.get("userInfo") or {}
-        current = account.get("currentMembership") or {}
-        billing = account.get("userBillingInfo") or {}
-        profiles_data = account.get("profiles") or {}
 
         # Status
-        status = membership.get("status", "Unknown")
-        is_active = "✅ Active" if status == "CURRENT_MEMBER" else "❌ Expired"
+        membership = account.get("membershipStatus") or {}
+        status_raw = membership.get("status", "") if isinstance(membership, dict) else str(membership)
+        is_active = "✅ Active" if "CURRENT" in str(status_raw) else "❌ Expired"
 
         # Country
-        country = account.get("countryOfSignup", "Unknown")
-        flag = get_flag(country)
+        country = account.get("countryOfSignup", "")
+        if not country:
+            country = (account.get("userInfo") or {}).get("countryOfSignup", "")
+        flag = get_flag(country) if country else "🌍"
+        country_str = f"{flag} {country}" if country else "🌍 Unknown"
 
         # Member since
-        member_since = account.get("memberSince", "Unknown")
+        member_since = account.get("memberSince", "")
         if isinstance(member_since, int):
             member_since = datetime.fromtimestamp(member_since/1000).strftime("%d %b %Y")
+        elif not member_since:
+            member_since = "Unknown"
 
         # Plan
-        plan_name = current.get("planName", "Unknown")
+        current = account.get("currentMembership") or {}
+        plan_name = current.get("planName", "") or current.get("videoQuality", "") or "Unknown"
 
         # Payment
-        payment_info = "Unknown"
+        billing = account.get("userBillingInfo") or {}
         payment_method = billing.get("paymentMethod") or {}
         card_type = payment_method.get("cardType", "")
         last4 = payment_method.get("last4Digits", "")
@@ -219,8 +229,11 @@ def check():
             payment_info = f"{card_type} - {last4}"
         elif payment_method.get("paymentType"):
             payment_info = payment_method.get("paymentType")
+        else:
+            payment_info = "Unknown"
 
         # Profiles
+        profiles_data = account.get("profiles") or {}
         profiles_list = []
         if isinstance(profiles_data, dict):
             for k, v in profiles_data.items():
@@ -231,6 +244,7 @@ def check():
         profiles_str = ", ".join(profiles_list) if profiles_list else "Unknown"
 
         # Email
+        user_info = account.get("userInfo") or {}
         email = user_info.get("userLogin", "Unknown")
         email_verified = "✅ Verified" if user_info.get("emailVerified") else "❌ Not Verified"
 
@@ -240,7 +254,7 @@ def check():
 
         return jsonify({
             "status": is_active,
-            "country": f"{flag} {country}",
+            "country": country_str,
             "member_since": member_since,
             "plan": plan_name,
             "payment": payment_info,
@@ -249,7 +263,8 @@ def check():
             "email_verified": email_verified,
             "extra_members": extra_str,
             "token": str(token),
-            "expires": format_expiry(expires)
+            "expires": format_expiry(expires),
+            "raw": account
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
