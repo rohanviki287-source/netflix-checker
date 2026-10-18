@@ -49,7 +49,7 @@ CHECK_PARAMS = {
     "model": "saget",
     "modelType": "IPHONE8-1",
     "odpAware": "true",
-    "path": '["account","userInfo","name","userGuid","userLogin","emailVerified","countryOfSignup","memberSince","membershipStatus","currentMembership","planName","videoQuality","userBillingInfo","profiles","summary"]',
+    "path": '[["account","userInfo"],["account","membershipStatus"],["account","countryOfSignup"],["account","memberSince"],["account","currentMembership","planName"],["account","currentMembership","videoQuality"],["account","profiles","summary"],["account","userBillingInfo"]]',
     "pathFormat": "graph",
     "pixelDensity": "2.0",
     "progressive": "false",
