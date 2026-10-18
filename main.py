@@ -269,6 +269,26 @@ def check():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/raw", methods=["GET"])
+def raw():
+    cookie_raw = request.args.get("cookie", "")
+    if not cookie_raw:
+        return jsonify({"error": "No cookie provided"}), 400
+    try:
+        cookie_dict = extract_cookie_dict(cookie_raw)
+        netflix_id = cookie_dict.get("NetflixId")
+        secure_id = cookie_dict.get("SecureNetflixId", "")
+        headers = dict(BASE_HEADERS)
+        cookie_str = f"NetflixId={netflix_id}"
+        if secure_id:
+            cookie_str += f"; SecureNetflixId={secure_id}"
+        headers["Cookie"] = cookie_str
+        response = requests.get(CHECK_URL, params=CHECK_PARAMS, headers=headers, timeout=30, verify=False)
+        return jsonify(response.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
