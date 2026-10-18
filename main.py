@@ -307,58 +307,73 @@ def scrape():
 
         response = requests.get(account_url, headers=headers, timeout=30, verify=False, allow_redirects=True)
         html = response.text
-        soup = BeautifulSoup(html, "html.parser")
 
-        # Extract all text snippets for debugging
         result = {}
 
-        # Try multiple patterns
-        patterns = [
-            r'"userLogin"\s*:\s*"([^"]+)"',
-            r'"emailAddress"\s*:\s*"([^"]+)"',
-            r'"email"\s*:\s*"([^"]+)"',
-        ]
-        for p in patterns:
+        # Email
+        for p in [r'"userLogin"\s*:\s*"([^"]+)"', r'"emailAddress"\s*:\s*"([^"]+)"', r'"email"\s*:\s*"([^"]+)"']:
             m = re.search(p, html)
             if m:
-                result["email_found"] = m.group(1)
+                result["email"] = m.group(1).replace("\\x40", "@").replace("\\u0040", "@")
                 break
 
-        # Member since
-        m = re.search(r'"memberSince"\s*:\s*"([^"]+)"', html)
-        if m:
-            result["member_since"] = m.group(1)
-
-        # Plan
-        m = re.search(r'"planName"\s*:\s*"([^"]+)"', html)
-        if m:
-            result["plan"] = m.group(1)
+        # Email verified
+        m = re.search(r'"emailVerified"\s*:\s*(true|false)', html)
+        result["email_verified"] = "✅ Verified" if m and m.group(1) == "true" else "❌ Not Verified"
 
         # Country
         m = re.search(r'"countryOfSignup"\s*:\s*"([^"]+)"', html)
         if m:
-            result["country"] = m.group(1)
+            country = m.group(1)
+            result["country"] = get_flag(country) + " " + country
+
+        # Member since
+        m = re.search(r'"memberSince"\s*:\s*"([^"]+)"', html)
+        if m:
+            result["member_since"] = m.group(1).replace("\\x20", " ").replace("\\u0020", " ")
 
         # Status
         m = re.search(r'"membershipStatus"\s*:\s*"([^"]+)"', html)
         if m:
-            result["status"] = m.group(1)
+            s = m.group(1)
+            result["status"] = "✅ Active" if "CURRENT" in s else "❌ Expired"
+
+        # Plan
+        for p in [r'"planName"\s*:\s*"([^"]+)"', r'"Plan"\s*:\s*"([^"]+)"', r'"subscriptionPlan"\s*:\s*"([^"]+)"']:
+            m = re.search(p, html)
+            if m:
+                result["plan"] = m.group(1)
+                break
+        if "plan" not in result:
+            # Try to find plan from HTML text
+            for plan in ["Standard with ads", "Standard", "Premium", "Basic"]:
+                if plan.lower() in html.lower():
+                    result["plan"] = plan
+                    break
 
         # Payment
         m = re.search(r'"cardType"\s*:\s*"([^"]+)"', html)
-        if m:
-            result["card_type"] = m.group(1)
+        card_type = m.group(1) if m else ""
         m = re.search(r'"last4Digits"\s*:\s*"([^"]+)"', html)
+        last4 = m.group(1) if m else ""
+        if card_type and last4:
+            result["payment"] = f"{card_type} - {last4}"
+        else:
+            m = re.search(r'"paymentType"\s*:\s*"([^"]+)"', html)
+            result["payment"] = m.group(1) if m else "Unknown"
+
+        # Extra members
+        m = re.search(r'"extraMemberCount"\s*:\s*(\d+)', html)
         if m:
-            result["last4"] = m.group(1)
+            count = int(m.group(1))
+            result["extra_members"] = f"Yes ✅ ({count})" if count > 0 else "No ❌"
+        else:
+            result["extra_members"] = "No ❌"
 
-        # Profiles - find all profile names
+        # Profiles
         profiles = re.findall(r'"profileName"\s*:\s*"([^"]+)"', html)
-        if profiles:
-            result["profiles"] = list(set(profiles))
+        result["profiles"] = ", ".join(list(set(profiles))) if profiles else "Unknown"
 
-        # Save snippet of HTML for debugging
-        result["html_snippet"] = html[50000:51000]
         result["token"] = token
         result["expires"] = format_expiry(expires)
 
@@ -366,7 +381,6 @@ def scrape():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
