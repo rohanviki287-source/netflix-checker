@@ -12,7 +12,7 @@ requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 app = Flask(__name__)
 
 API_URL = "https://ios.prod.ftl.netflix.com/iosui/user/15.48"
-CHECK_URL = "https://ios.prod.ftl.netflix.com/iosui/user/15.48"
+CHECK_URL = "https://www.netflix.com/api/shakti/mre/pathEvaluator"
 
 QUERY_PARAMS = {
     "appVersion": "15.48.1",
@@ -29,27 +29,6 @@ QUERY_PARAMS = {
     "modelType": "IPHONE8-1",
     "odpAware": "true",
     "path": '["account","token","default"]',
-    "pathFormat": "graph",
-    "pixelDensity": "2.0",
-    "progressive": "false",
-    "responseFormat": "json",
-}
-
-CHECK_PARAMS = {
-    "appVersion": "15.48.1",
-    "config": '{"gamesInTrailersEnabled":"false"}',
-    "device_type": "NFAPPL-02-",
-    "esn": "NFAPPL-02-IPHONE8%3D1-PXA-02026U9VV5O8AUKEAEO8PUJETCGDD4PQRI9DEB3MDLEMD0EACM4CS78LMD334MN3MQ3NMJ8SU9O9MVGS6BJCURM1PH1MUTGDPF4S4200",
-    "idiom": "phone",
-    "iosVersion": "15.48.1",
-    "isTablet": "false",
-    "languages": "en-US",
-    "locale": "en-US",
-    "maxDeviceWidth": "375",
-    "model": "saget",
-    "modelType": "IPHONE8-1",
-    "odpAware": "true",
-    "path": '[["account","userInfo"],["account","membershipStatus"],["account","countryOfSignup"],["account","memberSince"],["account","currentMembership","planName"],["account","currentMembership","videoQuality"],["account","profiles","summary"],["account","userBillingInfo"]]',
     "pathFormat": "graph",
     "pixelDensity": "2.0",
     "progressive": "false",
@@ -84,6 +63,16 @@ BASE_HEADERS = {
     "x-netflix.context.pixel-density": "2.0",
     "x-netflix.request.toplevel.uuid": "90AFE39F-ADF1-4D8A-B33E-528730990FE3",
     "x-netflix.request.client.timezoneid": "Asia/Dhaka",
+}
+
+WEB_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Content-Type": "application/json",
+    "X-Netflix.browserName": "Chrome",
+    "X-Netflix.browserVersion": "120",
+    "X-Netflix.clientType": "akira",
 }
 
 COOKIE_KEYS = ("NetflixId", "SecureNetflixId", "nfvdid", "OptanonConsent")
@@ -149,14 +138,33 @@ def fetch_nftoken(cookie_dict):
 def fetch_account_info(cookie_dict):
     netflix_id = cookie_dict.get("NetflixId")
     secure_id = cookie_dict.get("SecureNetflixId", "")
+    nfvdid = cookie_dict.get("nfvdid", "")
     if not netflix_id:
         raise ValueError("Missing NetflixId in cookie")
-    headers = dict(BASE_HEADERS)
+    headers = dict(WEB_HEADERS)
     cookie_str = f"NetflixId={netflix_id}"
     if secure_id:
         cookie_str += f"; SecureNetflixId={secure_id}"
+    if nfvdid:
+        cookie_str += f"; nfvdid={nfvdid}"
     headers["Cookie"] = cookie_str
-    response = requests.get(CHECK_URL, params=CHECK_PARAMS, headers=headers, timeout=30, verify=False)
+    body = {
+        "paths": [
+            ["account", "userInfo", "name"],
+            ["account", "userInfo", "userLogin"],
+            ["account", "userInfo", "emailVerified"],
+            ["account", "userInfo", "countryOfSignup"],
+            ["account", "memberSince"],
+            ["account", "membershipStatus"],
+            ["account", "currentMembership", "planName"],
+            ["account", "currentMembership", "videoQuality"],
+            ["account", "currentMembership", "extraMemberCount"],
+            ["account", "userBillingInfo"],
+            ["account", "profiles", {"from": 0, "to": 10}, "summary"]
+        ],
+        "authURL": ""
+    }
+    response = requests.post(CHECK_URL, json=body, headers=headers, timeout=30, verify=False)
     response.raise_for_status()
     return response.json()
 
@@ -190,15 +198,8 @@ def raw():
         return jsonify({"error": "No cookie provided"}), 400
     try:
         cookie_dict = extract_cookie_dict(cookie_raw)
-        netflix_id = cookie_dict.get("NetflixId")
-        secure_id = cookie_dict.get("SecureNetflixId", "")
-        headers = dict(BASE_HEADERS)
-        cookie_str = f"NetflixId={netflix_id}"
-        if secure_id:
-            cookie_str += f"; SecureNetflixId={secure_id}"
-        headers["Cookie"] = cookie_str
-        response = requests.get(CHECK_URL, params=CHECK_PARAMS, headers=headers, timeout=30, verify=False)
-        return jsonify(response.json())
+        data = fetch_account_info(cookie_dict)
+        return jsonify(data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -220,9 +221,8 @@ def check():
         is_active = "✅ Active" if "CURRENT" in str(status_raw) else "❌ Expired"
 
         # Country
-        country = account.get("countryOfSignup", "")
-        if not country:
-            country = (account.get("userInfo") or {}).get("countryOfSignup", "")
+        user_info = account.get("userInfo") or {}
+        country = user_info.get("countryOfSignup", "") or account.get("countryOfSignup", "")
         flag = get_flag(country) if country else "🌍"
         country_str = f"{flag} {country}" if country else "🌍 Unknown"
 
@@ -255,13 +255,13 @@ def check():
         if isinstance(profiles_data, dict):
             for k, v in profiles_data.items():
                 if isinstance(v, dict):
-                    name = v.get("profileName", "")
+                    summary = v.get("summary") or {}
+                    name = summary.get("profileName", "") or v.get("profileName", "")
                     if name:
                         profiles_list.append(name)
         profiles_str = ", ".join(profiles_list) if profiles_list else "Unknown"
 
         # Email
-        user_info = account.get("userInfo") or {}
         email = user_info.get("userLogin", "Unknown")
         email_verified = "✅ Verified" if user_info.get("emailVerified") else "❌ Not Verified"
 
