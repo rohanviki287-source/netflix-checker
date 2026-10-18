@@ -297,7 +297,6 @@ def scrape():
         cookie_dict = extract_cookie_dict(cookie_raw)
         token, expires = fetch_nftoken(cookie_dict)
 
-        # Open Netflix account page with token
         account_url = "https://www.netflix.com/account?nftoken=" + token
 
         headers = {
@@ -307,32 +306,63 @@ def scrape():
         }
 
         response = requests.get(account_url, headers=headers, timeout=30, verify=False, allow_redirects=True)
-        
-        # Get page source
         html = response.text
-        
-        # Try to find Netflix's state JSON in page
-        match = re.search(r'netflix\.reactContext\s*=\s*({.*?});', html, re.DOTALL)
-        if not match:
-            match = re.search(r'window\.netflix\s*=\s*window\.netflix\s*\|\|\s*{}\s*;.*?netflix\.contextData\s*=\s*({.*?});', html, re.DOTALL)
-
-        if match:
-            try:
-                state = json.loads(match.group(1))
-                return jsonify({"found": True, "data": state})
-            except:
-                pass
-
-        # Return raw HTML length and title for debugging
         soup = BeautifulSoup(html, "html.parser")
-        title = soup.title.string if soup.title else "No title"
-        
-        return jsonify({
-            "title": title,
-            "url": response.url,
-            "html_length": len(html),
-            "found_state": False
-        })
+
+        # Extract all text snippets for debugging
+        result = {}
+
+        # Try multiple patterns
+        patterns = [
+            r'"userLogin"\s*:\s*"([^"]+)"',
+            r'"emailAddress"\s*:\s*"([^"]+)"',
+            r'"email"\s*:\s*"([^"]+)"',
+        ]
+        for p in patterns:
+            m = re.search(p, html)
+            if m:
+                result["email_found"] = m.group(1)
+                break
+
+        # Member since
+        m = re.search(r'"memberSince"\s*:\s*"([^"]+)"', html)
+        if m:
+            result["member_since"] = m.group(1)
+
+        # Plan
+        m = re.search(r'"planName"\s*:\s*"([^"]+)"', html)
+        if m:
+            result["plan"] = m.group(1)
+
+        # Country
+        m = re.search(r'"countryOfSignup"\s*:\s*"([^"]+)"', html)
+        if m:
+            result["country"] = m.group(1)
+
+        # Status
+        m = re.search(r'"membershipStatus"\s*:\s*"([^"]+)"', html)
+        if m:
+            result["status"] = m.group(1)
+
+        # Payment
+        m = re.search(r'"cardType"\s*:\s*"([^"]+)"', html)
+        if m:
+            result["card_type"] = m.group(1)
+        m = re.search(r'"last4Digits"\s*:\s*"([^"]+)"', html)
+        if m:
+            result["last4"] = m.group(1)
+
+        # Profiles - find all profile names
+        profiles = re.findall(r'"profileName"\s*:\s*"([^"]+)"', html)
+        if profiles:
+            result["profiles"] = list(set(profiles))
+
+        # Save snippet of HTML for debugging
+        result["html_snippet"] = html[50000:51000]
+        result["token"] = token
+        result["expires"] = format_expiry(expires)
+
+        return jsonify(result)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
