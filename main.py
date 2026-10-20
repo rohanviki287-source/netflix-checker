@@ -302,40 +302,37 @@ def scrape():
                 else:
                     result["payment"] = "Unknown"
 
-                        # Payment history - get first 3 amounts from payment history table only
-        # Find the payment history section (after "Payment History" heading)
-        billing_html = html3
+        # Payment history - find amounts next to dates in table
+        # Pattern: date followed eventually by total amount
+        # Look for rows with membership dates
+        rows = re.findall(r'\d{1,2}/\d{1,2}/\d{4}.*?(?:₹|€|\$|£)([\d,]+)(?:\s*<)', html3, re.DOTALL)
         
-        # Find all Total amounts from the table rows
-        # Look for pattern: ₹XXX bold amounts in table
-        total_amounts = re.findall(r'₹\s*(\d+(?:\.\d{2})?)\s*(?:</strong>|</b>|<br|<span)', billing_html)
-        
-        if not total_amounts:
-            # Try another pattern - amounts that appear as totals
-            total_amounts = re.findall(r'(?:Total|total)[^\d₹]*[₹$€£¥]\s*(\d+(?:\.\d{2})?)', billing_html)
-        
-        if not total_amounts:
-            # Get all amounts after "Payment History" section only
-            idx = billing_html.find("Payment History")
-            if idx > 0:
-                billing_section = billing_html[idx:]
-                total_amounts = re.findall(r'₹\s*(\d+)', billing_section)
+        currency = "₹" if "₹" in html3 else ("€" if "€" in html3 else "$")
 
-        currency = "₹" if "₹" in billing_html else "$"
-        
-        if total_amounts:
-            # Skip first (upcoming) take next 3
-            payment_list = [currency + a for a in total_amounts]
-            # Remove duplicates while keeping order
-            seen_vals = []
-            ordered = []
-            for p in payment_list:
-                if p not in seen_vals:
-                    seen_vals.append(p)
-                    ordered.append(p)
-            result["payment_history"] = ", ".join(ordered[1:4])
+        if rows:
+            clean = []
+            for r in rows:
+                r = r.replace(",", "")
+                try:
+                    val = float(r)
+                    if val > 100:  # skip tiny amounts
+                        clean.append(currency + r)
+                except:
+                    pass
+            result["payment_history"] = ", ".join(clean[:3]) if clean else "Unknown"
         else:
-            result["payment_history"] = "Unknown"
+            # Last resort - find all bold/strong amounts in billing section
+            idx = html3.find("Payment History")
+            if idx > 0:
+                section = html3[idx:idx+10000]
+                # Find amounts that are whole numbers (not decimals = not taxes)
+                whole_amounts = re.findall(r'(?<!\.)(?:₹|€|\$|£)\s*(\d{3,4})(?!\d)(?!\.\d)', section)
+                if whole_amounts:
+                    result["payment_history"] = ", ".join([currency + a for a in whole_amounts[:3]])
+                else:
+                    result["payment_history"] = "Unknown"
+            else:
+                result["payment_history"] = "Unknown"
 
         # Extra members
         m = re.search(r'"extraMemberCount"\s*:\s*(\d+)', html)
