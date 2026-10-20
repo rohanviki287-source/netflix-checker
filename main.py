@@ -298,32 +298,42 @@ def scrape():
                 else:
                     result["payment"] = "Unknown"
 
-        # Payment history - last 3 with currency symbol
-        # Find currency symbol
+                # Payment history - only from payment history table not upcoming
+        # Skip the first amount (upcoming billing) get only past payments
+        amounts = re.findall(r'[₹$€£¥]\s*([\d,]+(?:\.\d{2})?)', html3)
+        
         currency = ""
         currency_match = re.search(r'([₹$€£¥])\s*[\d]', html3)
         if currency_match:
             currency = currency_match.group(1)
 
-        # Find total amounts (not tax amounts)
-        amounts = re.findall(r'[₹$€£¥]\s*([\d,]+(?:\.\d{2})?)', html3)
-        
-        # Filter out tax amounts and duplicates - get unique payment amounts
         seen = []
         clean_amounts = []
         for a in amounts:
             a_clean = a.replace(",", "")
             try:
                 val = float(a_clean)
-                # Skip small amounts (likely taxes) and already seen
                 if val > 50 and a not in seen:
                     seen.append(a)
                     clean_amounts.append(currency + a)
             except:
                 pass
 
-        if clean_amounts:
-            result["payment_history"] = ", ".join(clean_amounts[:3])
+        # Skip first amount (upcoming billing amount)
+        if len(clean_amounts) > 1:
+            clean_amounts = clean_amounts[1:]
+
+        # Only get whole amounts not tax amounts
+        # Tax amounts are usually smaller like 422.88 vs 499
+        final_amounts = []
+        for a in clean_amounts:
+            # Skip tax amounts (usually decimal and smaller)
+            num = float(a.replace(currency, "").replace(",", ""))
+            if not (num < max([float(x.replace(currency, "").replace(",", "")) for x in clean_amounts]) * 0.9 and "." in a):
+                final_amounts.append(a)
+
+        if final_amounts:
+            result["payment_history"] = ", ".join(final_amounts[:3])
         else:
             result["payment_history"] = "Unknown"
 
