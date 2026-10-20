@@ -298,17 +298,34 @@ def scrape():
                 else:
                     result["payment"] = "Unknown"
 
-        # Payment history - last 3 amounts from billing page
-        amounts = re.findall(r'[₹$€£¥][\s]*([\d,]+(?:\.\d{2})?)', html3)
-        if amounts:
-            result["payment_history"] = ", ".join(amounts[:3])
+        # Payment history - last 3 with currency symbol
+        # Find currency symbol
+        currency = ""
+        currency_match = re.search(r'([₹$€£¥])\s*[\d]', html3)
+        if currency_match:
+            currency = currency_match.group(1)
+
+        # Find total amounts (not tax amounts)
+        amounts = re.findall(r'[₹$€£¥]\s*([\d,]+(?:\.\d{2})?)', html3)
+        
+        # Filter out tax amounts and duplicates - get unique payment amounts
+        seen = []
+        clean_amounts = []
+        for a in amounts:
+            a_clean = a.replace(",", "")
+            try:
+                val = float(a_clean)
+                # Skip small amounts (likely taxes) and already seen
+                if val > 50 and a not in seen:
+                    seen.append(a)
+                    clean_amounts.append(currency + a)
+            except:
+                pass
+
+        if clean_amounts:
+            result["payment_history"] = ", ".join(clean_amounts[:3])
         else:
-            # Try different pattern
-            amounts2 = re.findall(r'"amount"\s*:\s*"?([^",}]+)"?', html3)
-            if amounts2:
-                result["payment_history"] = ", ".join(amounts2[:3])
-            else:
-                result["payment_history"] = "Unknown"
+            result["payment_history"] = "Unknown"
 
         # Extra members
         m = re.search(r'"extraMemberCount"\s*:\s*(\d+)', html)
