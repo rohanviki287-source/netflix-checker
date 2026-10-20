@@ -263,9 +263,13 @@ def scrape():
                 last4 = m.group(1)
                 break
 
-        # Also check billing page for last4
+                # Last4 from billing page
         if not last4:
-            m = re.search(r'(\d{4})\s*</td>', html3)
+            m = re.search(r'(?:VISA|Mastercard|AMEX)[^<]*?(\d{4})', html3, re.IGNORECASE)
+            if m:
+                last4 = m.group(1)
+        if not last4:
+            m = re.search(r'(\d{4})\s*\n', html3)
             if m:
                 last4 = m.group(1)
 
@@ -298,42 +302,38 @@ def scrape():
                 else:
                     result["payment"] = "Unknown"
 
-                # Payment history - only from payment history table not upcoming
-        # Skip the first amount (upcoming billing) get only past payments
-        amounts = re.findall(r'[₹$€£¥]\s*([\d,]+(?:\.\d{2})?)', html3)
+                        # Payment history - get first 3 amounts from payment history table only
+        # Find the payment history section (after "Payment History" heading)
+        billing_html = html3
         
-        currency = ""
-        currency_match = re.search(r'([₹$€£¥])\s*[\d]', html3)
-        if currency_match:
-            currency = currency_match.group(1)
+        # Find all Total amounts from the table rows
+        # Look for pattern: ₹XXX bold amounts in table
+        total_amounts = re.findall(r'₹\s*(\d+(?:\.\d{2})?)\s*(?:</strong>|</b>|<br|<span)', billing_html)
+        
+        if not total_amounts:
+            # Try another pattern - amounts that appear as totals
+            total_amounts = re.findall(r'(?:Total|total)[^\d₹]*[₹$€£¥]\s*(\d+(?:\.\d{2})?)', billing_html)
+        
+        if not total_amounts:
+            # Get all amounts after "Payment History" section only
+            idx = billing_html.find("Payment History")
+            if idx > 0:
+                billing_section = billing_html[idx:]
+                total_amounts = re.findall(r'₹\s*(\d+)', billing_section)
 
-        seen = []
-        clean_amounts = []
-        for a in amounts:
-            a_clean = a.replace(",", "")
-            try:
-                val = float(a_clean)
-                if val > 50 and a not in seen:
-                    seen.append(a)
-                    clean_amounts.append(currency + a)
-            except:
-                pass
-
-        # Skip first amount (upcoming billing amount)
-        if len(clean_amounts) > 1:
-            clean_amounts = clean_amounts[1:]
-
-        # Only get whole amounts not tax amounts
-        # Tax amounts are usually smaller like 422.88 vs 499
-        final_amounts = []
-        for a in clean_amounts:
-            # Skip tax amounts (usually decimal and smaller)
-            num = float(a.replace(currency, "").replace(",", ""))
-            if not (num < max([float(x.replace(currency, "").replace(",", "")) for x in clean_amounts]) * 0.9 and "." in a):
-                final_amounts.append(a)
-
-        if final_amounts:
-            result["payment_history"] = ", ".join(final_amounts[:3])
+        currency = "₹" if "₹" in billing_html else "$"
+        
+        if total_amounts:
+            # Skip first (upcoming) take next 3
+            payment_list = [currency + a for a in total_amounts]
+            # Remove duplicates while keeping order
+            seen_vals = []
+            ordered = []
+            for p in payment_list:
+                if p not in seen_vals:
+                    seen_vals.append(p)
+                    ordered.append(p)
+            result["payment_history"] = ", ".join(ordered[1:4])
         else:
             result["payment_history"] = "Unknown"
 
