@@ -6,6 +6,7 @@ import urllib.parse
 from datetime import datetime
 from flask import Flask, request, jsonify
 from urllib3.exceptions import InsecureRequestWarning
+from bs4 import BeautifulSoup
 
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
@@ -65,16 +66,6 @@ BASE_HEADERS = {
     "x-netflix.request.client.timezoneid": "Asia/Dhaka",
 }
 
-WEB_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "application/json",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Content-Type": "application/json",
-    "X-Netflix.browserName": "Chrome",
-    "X-Netflix.browserVersion": "120",
-    "X-Netflix.clientType": "akira",
-}
-
 COOKIE_KEYS = ("NetflixId", "SecureNetflixId", "nfvdid", "OptanonConsent")
 
 COUNTRY_FLAGS = {
@@ -86,6 +77,23 @@ COUNTRY_FLAGS = {
     "TH": "🇹🇭", "MY": "🇲🇾", "SG": "🇸🇬", "PK": "🇵🇰", "BD": "🇧🇩",
     "NG": "🇳🇬", "ZA": "🇿🇦", "EG": "🇪🇬", "SA": "🇸🇦", "AE": "🇦🇪",
     "PT": "🇵🇹", "RO": "🇷🇴", "CZ": "🇨🇿", "HU": "🇭🇺", "GR": "🇬🇷",
+    "UA": "🇺🇦", "RU": "🇷🇺", "IL": "🇮🇱", "VN": "🇻🇳", "NZ": "🇳🇿",
+    "BE": "🇧🇪", "AT": "🇦🇹", "CH": "🇨🇭", "IE": "🇮🇪", "HK": "🇭🇰",
+    "TW": "🇹🇼", "CN": "🇨🇳", "LK": "🇱🇰", "NP": "🇳🇵", "MM": "🇲🇲",
+    "KH": "🇰🇭", "LA": "🇱🇦", "BN": "🇧🇳", "MN": "🇲🇳", "AF": "🇦🇫",
+    "IQ": "🇮🇶", "IR": "🇮🇷", "JO": "🇯🇴", "KW": "🇰🇼", "LB": "🇱🇧",
+    "OM": "🇴🇲", "QA": "🇶🇦", "SY": "🇸🇾", "YE": "🇾🇪", "BH": "🇧🇭",
+    "KE": "🇰🇪", "GH": "🇬🇭", "ET": "🇪🇹", "TZ": "🇹🇿", "UG": "🇺🇬",
+    "DZ": "🇩🇿", "MA": "🇲🇦", "TN": "🇹🇳", "LY": "🇱🇾", "SD": "🇸🇩",
+    "PE": "🇵🇪", "VE": "🇻🇪", "EC": "🇪🇨", "BO": "🇧🇴", "PY": "🇵🇾",
+    "UY": "🇺🇾", "CR": "🇨🇷", "PA": "🇵🇦", "GT": "🇬🇹", "HN": "🇭🇳",
+    "SV": "🇸🇻", "NI": "🇳🇮", "DO": "🇩🇴", "CU": "🇨🇺", "JM": "🇯🇲",
+    "PL": "🇵🇱", "BG": "🇧🇬", "HR": "🇭🇷", "RS": "🇷🇸", "SK": "🇸🇰",
+    "SI": "🇸🇮", "LT": "🇱🇹", "LV": "🇱🇻", "EE": "🇪🇪", "BY": "🇧🇾",
+    "MD": "🇲🇩", "AL": "🇦🇱", "MK": "🇲🇰", "BA": "🇧🇦", "ME": "🇲🇪",
+    "XK": "🇽🇰", "IS": "🇮🇸", "LU": "🇱🇺", "MT": "🇲🇹", "CY": "🇨🇾",
+    "GE": "🇬🇪", "AM": "🇦🇲", "AZ": "🇦🇿", "KZ": "🇰🇿", "UZ": "🇺🇿",
+    "TM": "🇹🇲", "KG": "🇰🇬", "TJ": "🇹🇯",
 }
 
 def decode_value(value):
@@ -135,39 +143,6 @@ def fetch_nftoken(cookie_dict):
         expires //= 1000
     return token, expires
 
-def fetch_account_info(cookie_dict):
-    netflix_id = cookie_dict.get("NetflixId")
-    secure_id = cookie_dict.get("SecureNetflixId", "")
-    nfvdid = cookie_dict.get("nfvdid", "")
-    if not netflix_id:
-        raise ValueError("Missing NetflixId in cookie")
-    headers = dict(WEB_HEADERS)
-    cookie_str = f"NetflixId={netflix_id}"
-    if secure_id:
-        cookie_str += f"; SecureNetflixId={secure_id}"
-    if nfvdid:
-        cookie_str += f"; nfvdid={nfvdid}"
-    headers["Cookie"] = cookie_str
-    body = {
-        "paths": [
-            ["account", "userInfo", "name"],
-            ["account", "userInfo", "userLogin"],
-            ["account", "userInfo", "emailVerified"],
-            ["account", "userInfo", "countryOfSignup"],
-            ["account", "memberSince"],
-            ["account", "membershipStatus"],
-            ["account", "currentMembership", "planName"],
-            ["account", "currentMembership", "videoQuality"],
-            ["account", "currentMembership", "extraMemberCount"],
-            ["account", "userBillingInfo"],
-            ["account", "profiles", {"from": 0, "to": 10}, "summary"]
-        ],
-        "authURL": ""
-    }
-    response = requests.post(CHECK_URL, json=body, headers=headers, timeout=30, verify=False)
-    response.raise_for_status()
-    return response.json()
-
 def format_expiry(expires):
     try:
         return datetime.fromtimestamp(expires).strftime("%Y-%m-%d %H:%M:%S")
@@ -191,103 +166,6 @@ def withdraw():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/raw", methods=["GET"])
-def raw():
-    cookie_raw = request.args.get("cookie", "")
-    if not cookie_raw:
-        return jsonify({"error": "No cookie provided"}), 400
-    try:
-        cookie_dict = extract_cookie_dict(cookie_raw)
-        data = fetch_account_info(cookie_dict)
-        return jsonify(data)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/check", methods=["GET"])
-def check():
-    cookie_raw = request.args.get("cookie", "")
-    if not cookie_raw:
-        return jsonify({"error": "No cookie provided"}), 400
-    try:
-        cookie_dict = extract_cookie_dict(cookie_raw)
-        data = fetch_account_info(cookie_dict)
-        token, expires = fetch_nftoken(cookie_dict)
-
-        account = (data.get("value") or {}).get("account") or {}
-
-        # Status
-        membership = account.get("membershipStatus") or {}
-        status_raw = membership.get("status", "") if isinstance(membership, dict) else str(membership)
-        is_active = "✅ Active" if "CURRENT" in str(status_raw) else "❌ Expired"
-
-        # Country
-        user_info = account.get("userInfo") or {}
-        country = user_info.get("countryOfSignup", "") or account.get("countryOfSignup", "")
-        flag = get_flag(country) if country else "🌍"
-        country_str = f"{flag} {country}" if country else "🌍 Unknown"
-
-        # Member since
-        member_since = account.get("memberSince", "")
-        if isinstance(member_since, int):
-            member_since = datetime.fromtimestamp(member_since/1000).strftime("%d %b %Y")
-        elif not member_since:
-            member_since = "Unknown"
-
-        # Plan
-        current = account.get("currentMembership") or {}
-        plan_name = current.get("planName", "") or current.get("videoQuality", "") or "Unknown"
-
-        # Payment
-        billing = account.get("userBillingInfo") or {}
-        payment_method = billing.get("paymentMethod") or {}
-        card_type = payment_method.get("cardType", "")
-        last4 = payment_method.get("last4Digits", "")
-        if card_type and last4:
-            payment_info = f"{card_type} - {last4}"
-        elif payment_method.get("paymentType"):
-            payment_info = payment_method.get("paymentType")
-        else:
-            payment_info = "Unknown"
-
-        # Profiles
-        profiles_data = account.get("profiles") or {}
-        profiles_list = []
-        if isinstance(profiles_data, dict):
-            for k, v in profiles_data.items():
-                if isinstance(v, dict):
-                    summary = v.get("summary") or {}
-                    name = summary.get("profileName", "") or v.get("profileName", "")
-                    if name:
-                        profiles_list.append(name)
-        profiles_str = ", ".join(profiles_list) if profiles_list else "Unknown"
-
-        # Email
-        email = user_info.get("userLogin", "Unknown")
-        email_verified = "✅ Verified" if user_info.get("emailVerified") else "❌ Not Verified"
-
-        # Extra members
-        extra_members = current.get("extraMemberCount", 0)
-        extra_str = f"Yes ✅ ({extra_members})" if extra_members and extra_members > 0 else "No ❌"
-
-        return jsonify({
-            "status": is_active,
-            "country": country_str,
-            "member_since": member_since,
-            "plan": plan_name,
-            "payment": payment_info,
-            "profiles": profiles_str,
-            "email": email,
-            "email_verified": email_verified,
-            "extra_members": extra_str,
-            "token": str(token),
-            "expires": format_expiry(expires),
-            "raw": account
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-from bs4 import BeautifulSoup
-
 @app.route("/scrape", methods=["GET"])
 def scrape():
     cookie_raw = request.args.get("cookie", "")
@@ -307,11 +185,10 @@ def scrape():
 
         response = requests.get(account_url, headers=headers, timeout=30, verify=False, allow_redirects=True)
         html = response.text
-
         result = {}
 
         # Email
-        for p in [r'"userLogin"\s*:\s*"([^"]+)"', r'"emailAddress"\s*:\s*"([^"]+)"', r'"email"\s*:\s*"([^"]+)"']:
+        for p in [r'"userLogin"\s*:\s*"([^"]+)"', r'"emailAddress"\s*:\s*"([^"]+)"']:
             m = re.search(p, html)
             if m:
                 result["email"] = m.group(1).replace("\\x40", "@").replace("\\u0040", "@")
@@ -360,35 +237,28 @@ def scrape():
                     result["plan"] = plan
                     break
 
-        # Payment - all types
+        # Payment
         card_type = ""
         last4 = ""
-
-        # Card type
         for p in [r'"cardType"\s*:\s*"([^"]+)"', r'"brand"\s*:\s*"([^"]+)"', r'"cardBrand"\s*:\s*"([^"]+)"']:
             m = re.search(p, html)
             if m:
                 card_type = m.group(1)
                 break
-
-        # Last 4 digits
         for p in [r'"last4Digits"\s*:\s*"([^"]+)"', r'"last4"\s*:\s*"([^"]+)"', r'"lastFourDigits"\s*:\s*"([^"]+)"']:
             m = re.search(p, html)
             if m:
                 last4 = m.group(1)
                 break
-
         if card_type and last4:
             result["payment"] = f"{card_type} - {last4}"
         elif card_type:
             result["payment"] = card_type
         else:
-            # Check payment type
             for p in [r'"paymentMethodType"\s*:\s*"([^"]+)"', r'"paymentType"\s*:\s*"([^"]+)"', r'"instrumentType"\s*:\s*"([^"]+)"']:
                 m = re.search(p, html)
                 if m:
                     ptype = m.group(1).upper()
-                    # Map payment types
                     if "UPI" in ptype:
                         result["payment"] = "UPI"
                     elif "PAYPAL" in ptype:
@@ -402,10 +272,8 @@ def scrape():
                     else:
                         result["payment"] = ptype
                     break
-
             if "payment" not in result:
-                # Search in HTML text
-                m = re.search(r'(Mastercard|Visa|PayPal|AMEX|Discover|UPI|SEPA|Google Pay|Apple Pay)[^\d]*(\d{4})?', html, re.IGNORECASE)
+                m = re.search(r'(Mastercard|Visa|PayPal|AMEX|Discover|UPI|SEPA)[^\d]*(\d{4})?', html, re.IGNORECASE)
                 if m:
                     result["payment"] = f"{m.group(1)} - {m.group(2)}" if m.group(2) else m.group(1)
                 else:
@@ -430,3 +298,7 @@ def scrape():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
