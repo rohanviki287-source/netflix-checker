@@ -318,8 +318,18 @@ def scrape():
                 break
 
         # Email verified
-        m = re.search(r'"emailVerified"\s*:\s*(true|false)', html)
-        result["email_verified"] = "✅ Verified" if m and m.group(1) == "true" else "❌ Not Verified"
+        email_verified = "❌ Not Verified"
+        for p in [r'"emailVerified"\s*:\s*(true|false)', r'"isEmailVerified"\s*:\s*(true|false)']:
+            m = re.search(p, html)
+            if m:
+                email_verified = "✅ Verified" if m.group(1) == "true" else "❌ Not Verified"
+                break
+        result["email_verified"] = email_verified
+
+        # Phone verified
+        m = re.search(r'"phoneVerified"\s*:\s*(true|false)', html)
+        if m:
+            result["phone_verified"] = "✅ Verified" if m.group(1) == "true" else "❌ Not Verified"
 
         # Country
         m = re.search(r'"countryOfSignup"\s*:\s*"([^"]+)"', html)
@@ -339,28 +349,67 @@ def scrape():
             result["status"] = "✅ Active" if "CURRENT" in s else "❌ Expired"
 
         # Plan
-        for p in [r'"planName"\s*:\s*"([^"]+)"', r'"Plan"\s*:\s*"([^"]+)"', r'"subscriptionPlan"\s*:\s*"([^"]+)"']:
+        for p in [r'"planName"\s*:\s*"([^"]+)"', r'"subscriptionPlan"\s*:\s*"([^"]+)"']:
             m = re.search(p, html)
             if m:
                 result["plan"] = m.group(1)
                 break
         if "plan" not in result:
-            # Try to find plan from HTML text
-            for plan in ["Standard with ads", "Standard", "Premium", "Basic"]:
+            for plan in ["Premium", "Standard with ads", "Standard", "Basic"]:
                 if plan.lower() in html.lower():
                     result["plan"] = plan
                     break
 
-        # Payment
-        m = re.search(r'"cardType"\s*:\s*"([^"]+)"', html)
-        card_type = m.group(1) if m else ""
-        m = re.search(r'"last4Digits"\s*:\s*"([^"]+)"', html)
-        last4 = m.group(1) if m else ""
+        # Payment - all types
+        card_type = ""
+        last4 = ""
+
+        # Card type
+        for p in [r'"cardType"\s*:\s*"([^"]+)"', r'"brand"\s*:\s*"([^"]+)"', r'"cardBrand"\s*:\s*"([^"]+)"']:
+            m = re.search(p, html)
+            if m:
+                card_type = m.group(1)
+                break
+
+        # Last 4 digits
+        for p in [r'"last4Digits"\s*:\s*"([^"]+)"', r'"last4"\s*:\s*"([^"]+)"', r'"lastFourDigits"\s*:\s*"([^"]+)"']:
+            m = re.search(p, html)
+            if m:
+                last4 = m.group(1)
+                break
+
         if card_type and last4:
             result["payment"] = f"{card_type} - {last4}"
+        elif card_type:
+            result["payment"] = card_type
         else:
-            m = re.search(r'"paymentType"\s*:\s*"([^"]+)"', html)
-            result["payment"] = m.group(1) if m else "Unknown"
+            # Check payment type
+            for p in [r'"paymentMethodType"\s*:\s*"([^"]+)"', r'"paymentType"\s*:\s*"([^"]+)"', r'"instrumentType"\s*:\s*"([^"]+)"']:
+                m = re.search(p, html)
+                if m:
+                    ptype = m.group(1).upper()
+                    # Map payment types
+                    if "UPI" in ptype:
+                        result["payment"] = "UPI"
+                    elif "PAYPAL" in ptype:
+                        result["payment"] = "PayPal"
+                    elif "SEPA" in ptype:
+                        result["payment"] = "SEPA"
+                    elif "GOOGLE" in ptype:
+                        result["payment"] = "Google Pay"
+                    elif "APPLE" in ptype:
+                        result["payment"] = "Apple Pay"
+                    else:
+                        result["payment"] = ptype
+                    break
+
+            if "payment" not in result:
+                # Search in HTML text
+                m = re.search(r'(Mastercard|Visa|PayPal|AMEX|Discover|UPI|SEPA|Google Pay|Apple Pay)[^\d]*(\d{4})?', html, re.IGNORECASE)
+                if m:
+                    result["payment"] = f"{m.group(1)} - {m.group(2)}" if m.group(2) else m.group(1)
+                else:
+                    result["payment"] = "Unknown"
 
         # Extra members
         m = re.search(r'"extraMemberCount"\s*:\s*(\d+)', html)
@@ -381,6 +430,3 @@ def scrape():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
