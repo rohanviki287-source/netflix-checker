@@ -158,11 +158,10 @@ def get_flag(country_code):
 
 def decode_profile_name(name):
     try:
-        # Handle \u escapes
-        return name.encode('raw_unicode_escape').decode('unicode_escape')
+        return name.encode('utf-8').decode('unicode_escape').encode('latin1').decode('utf-8')
     except:
         try:
-            return bytes(name, 'utf-8').decode('utf-8')
+            return name.encode().decode('unicode_escape')
         except:
             return name
 
@@ -326,7 +325,7 @@ def scrape():
                     elif "APPLE" in ptype:
                         result["payment"] = "Apple Pay"
                     else:
-                        result["payment"] = ptype.upper()
+                        result["payment"] = ptype
                     break
             if "payment" not in result:
                 m = re.search(r'(Mastercard|Visa|PayPal|AMEX|Discover|UPI|SEPA)[^\d]*(\d{4})?', html3, re.IGNORECASE)
