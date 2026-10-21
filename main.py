@@ -158,54 +158,12 @@ def get_flag(country_code):
 
 def decode_profile_name(name):
     try:
-        return name.encode('raw_unicode_escape').decode('unicode_escape')
+        return name.encode('utf-8').decode('unicode_escape').encode('latin1').decode('utf-8')
     except:
         try:
-            return bytes(name, 'utf-8').decode('utf-8')
+            return name.encode().decode('unicode_escape')
         except:
             return name
-
-def get_payment_history(html3):
-    try:
-        soup = BeautifulSoup(html3, "html.parser")
-        
-        # Find all rows in the payment history table
-        amounts = []
-        
-        # Look for table rows with billing info
-        rows = soup.find_all("tr")
-        for row in rows:
-            cells = row.find_all("td")
-            if cells:
-                # Last cell is usually the total amount
-                last_cell = cells[-1]
-                text = last_cell.get_text(strip=True)
-                # Check if it has a number in it
-                if re.search(r'\d+', text) and len(text) < 30:
-                    amounts.append(text)
-        
-        if not amounts:
-            # Try finding amounts in divs with price-like content
-            all_elements = soup.find_all(["div", "span", "td", "p"])
-            for el in all_elements:
-                text = el.get_text(strip=True)
-                # Match text that looks like a price - currency code/symbol + number
-                if re.match(r'^[A-Z]{2,3}\s*[\d,]+$', text) or re.match(r'^[\d,]+\s*[A-Z]{2,3}$', text):
-                    amounts.append(text)
-
-        if amounts:
-            # Skip first (upcoming billing) take next 3
-            seen = []
-            clean = []
-            for a in amounts:
-                if a not in seen:
-                    seen.append(a)
-                    clean.append(a)
-            return ", ".join(clean[1:4]) if len(clean) > 1 else clean[0] if clean else "Unknown"
-        
-        return "Unknown"
-    except:
-        return "Unknown"
 
 @app.route("/withdraw", methods=["GET"])
 def withdraw():
@@ -233,16 +191,34 @@ def scrape():
         account_url = "https://www.netflix.com/account?nftoken=" + token
 
         # Page 1 - Account page
-        response = requests.get(account_url, headers=WEB_HEADERS, timeout=30, verify=False, allow_redirects=True)
+        response = requests.get(
+            account_url,
+            headers=WEB_HEADERS,
+            timeout=30,
+            verify=False,
+            allow_redirects=True
+        )
         html = response.text
         session_cookies = response.cookies
 
         # Page 2 - Security page
-        response2 = requests.get("https://www.netflix.com/account/security", headers=WEB_HEADERS, cookies=session_cookies, timeout=30, verify=False)
+        response2 = requests.get(
+            "https://www.netflix.com/account/security",
+            headers=WEB_HEADERS,
+            cookies=session_cookies,
+            timeout=30,
+            verify=False
+        )
         html2 = response2.text
 
-        # Page 3 - Billing page
-        response3 = requests.get("https://www.netflix.com/billingActivity", headers=WEB_HEADERS, cookies=session_cookies, timeout=30, verify=False)
+        # Page 3 - Billing page forced English
+        response3 = requests.get(
+            "https://www.netflix.com/billingActivity",
+            headers=WEB_HEADERS,
+            cookies=session_cookies,
+            timeout=30,
+            verify=False
+        )
         html3 = response3.text
 
         result = {}
@@ -303,21 +279,29 @@ def scrape():
                     result["plan"] = plan
                     break
 
-        # Payment
+        # Payment - card type
         card_type = ""
         last4 = ""
         for p in [r'"cardType"\s*:\s*"([^"]+)"', r'"brand"\s*:\s*"([^"]+)"', r'"cardBrand"\s*:\s*"([^"]+)"']:
             m = re.search(p, html)
             if m:
-                card_type = m.group(1).upper()
+                card_type = m.group(1)
                 break
+
+        # Last4 from account page
         for p in [r'"last4Digits"\s*:\s*"([^"]+)"', r'"last4"\s*:\s*"([^"]+)"', r'"lastFourDigits"\s*:\s*"([^"]+)"']:
             m = re.search(p, html)
             if m:
                 last4 = m.group(1)
                 break
+
+        # Last4 from billing page
         if not last4:
             m = re.search(r'(?:VISA|Mastercard|AMEX|Discover)[^\d]*(\d{4})', html3, re.IGNORECASE)
+            if m:
+                last4 = m.group(1)
+        if not last4:
+            m = re.search(r'(\d{4})\s*</', html3)
             if m:
                 last4 = m.group(1)
 
@@ -329,13 +313,61 @@ def scrape():
             for p in [r'"paymentMethodType"\s*:\s*"([^"]+)"', r'"paymentType"\s*:\s*"([^"]+)"']:
                 m = re.search(p, html)
                 if m:
-                    result["payment"] = m.group(1).upper()
+                    ptype = m.group(1).upper()
+                    if "UPI" in ptype:
+                        result["payment"] = "UPI"
+                    elif "PAYPAL" in ptype:
+                        result["payment"] = "PayPal"
+                    elif "SEPA" in ptype:
+                        result["payment"] = "SEPA"
+                    elif "GOOGLE" in ptype:
+                        result["payment"] = "Google Pay"
+                    elif "APPLE" in ptype:
+                        result["payment"] = "Apple Pay"
+                    else:
+                        result["payment"] = ptype
                     break
             if "payment" not in result:
-                result["payment"] = "Unknown"
+                m = re.search(r'(Mastercard|Visa|PayPal|AMEX|Discover|UPI|SEPA)[^\d]*(\d{4})?', html3, re.IGNORECASE)
+                if m:
+                    result["payment"] = f"{m.group(1)} - {m.group(2)}" if m.group(2) else m.group(1)
+                else:
+                    result["payment"] = "Unknown"
 
-        # Payment history using BeautifulSoup
-        result["payment_history"] = get_payment_history(html3)
+        # Payment history - find amounts from billing table
+        currency_match = re.search(r'([₹$€£¥]|INR|USD|EUR|GBP)\s*[\d]', html3)
+        currency = ""
+        if currency_match:
+            c = currency_match.group(1)
+            currency_map = {"INR": "₹", "USD": "$", "EUR": "€", "GBP": "£"}
+            currency = currency_map.get(c, c)
+
+        # Find amounts after "Payment History" section
+        idx = html3.find("Payment History")
+        if idx < 0:
+            # Try local language versions
+            for term in ["Riwayat Pembayaran", "Historial de pagos", "Historique des paiements", "Zahlungsverlauf"]:
+                idx = html3.find(term)
+                if idx >= 0:
+                    break
+
+        if idx >= 0:
+            section = html3[idx:idx+15000]
+            # Find whole number amounts (not decimals = not taxes)
+            amounts = re.findall(r'(?:₹|INR\s*|USD\s*|\$|€|£)\s*(\d{2,4})(?!\d)(?!\.\d)', section)
+            if amounts:
+                seen = []
+                clean = []
+                for a in amounts:
+                    if a not in seen and int(a) > 50:
+                        seen.append(a)
+                        clean.append(currency + a if currency else a)
+                # Skip first (upcoming) take next 3
+                result["payment_history"] = ", ".join(clean[1:4]) if len(clean) > 1 else ", ".join(clean[:3])
+            else:
+                result["payment_history"] = "Unknown"
+        else:
+            result["payment_history"] = "Unknown"
 
         # Extra members
         m = re.search(r'"extraMemberCount"\s*:\s*(\d+)', html)
@@ -345,7 +377,7 @@ def scrape():
         else:
             result["extra_members"] = "No ❌"
 
-        # Profiles
+        # Profiles - decode unicode
         profiles_raw = re.findall(r'"profileName"\s*:\s*"([^"]+)"', html)
         clean_profiles = []
         for p in profiles_raw:
