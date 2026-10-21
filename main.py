@@ -158,10 +158,11 @@ def get_flag(country_code):
 
 def decode_profile_name(name):
     try:
-        return name.encode('utf-8').decode('unicode_escape').encode('latin1').decode('utf-8')
+        # Handle \u escapes
+        return name.encode('raw_unicode_escape').decode('unicode_escape')
     except:
         try:
-            return name.encode().decode('unicode_escape')
+            return bytes(name, 'utf-8').decode('utf-8')
         except:
             return name
 
@@ -325,7 +326,7 @@ def scrape():
                     elif "APPLE" in ptype:
                         result["payment"] = "Apple Pay"
                     else:
-                        result["payment"] = ptype
+                        result["payment"] = ptype.upper()
                     break
             if "payment" not in result:
                 m = re.search(r'(Mastercard|Visa|PayPal|AMEX|Discover|UPI|SEPA)[^\d]*(\d{4})?', html3, re.IGNORECASE)
@@ -354,16 +355,18 @@ def scrape():
         if idx >= 0:
             section = html3[idx:idx+15000]
             # Find whole number amounts (not decimals = not taxes)
-            amounts = re.findall(r'(?:₹|INR\s*|USD\s*|\$|€|£)\s*(\d{2,4})(?!\d)(?!\.\d)', section)
-            if amounts:
-                seen = []
-                clean = []
-                for a in amounts:
-                    if a not in seen and int(a) > 50:
-                        seen.append(a)
-                        clean.append(currency + a if currency else a)
-                # Skip first (upcoming) take next 3
-                result["payment_history"] = ", ".join(clean[1:4]) if len(clean) > 1 else ", ".join(clean[:3])
+            # Find only whole round amounts (skip tax decimals)
+# Look for amounts like ₹499 not ₹422.88 or ₹76.12
+amounts = re.findall(r'(?:₹|INR\s*|\$|€|£)\s*(\d{3,4})(?!\d)(?!\.\d{1,2})', section)
+seen = []
+clean = []
+for a in amounts:
+    val = int(a)
+    if val > 100 and a not in seen:
+        seen.append(a)
+        clean.append(currency + a if currency else a)
+# Skip first (upcoming plan price)
+result["payment_history"] = ", ".join(clean[1:4]) if len(clean) > 1 else "Unknown"
             else:
                 result["payment_history"] = "Unknown"
         else:
