@@ -357,20 +357,22 @@ def scrape():
             # Find whole number amounts (not decimals = not taxes)
             # Find only whole round amounts (skip tax decimals)
 # Look for amounts like ₹499 not ₹422.88 or ₹76.12
-amounts = re.findall(r'(?:₹|INR\s*|\$|€|£)\s*(\d{3,4})(?!\d)(?!\.\d{1,2})', section)
-seen = []
-clean = []
-for a in amounts:
-    val = int(a)
-    if val > 100 and a not in seen:
-        seen.append(a)
-        clean.append(currency + a if currency else a)
-# Skip first (upcoming plan price)
-result["payment_history"] = ", ".join(clean[1:4]) if len(clean) > 1 else "Unknown"
-            else:
-                result["payment_history"] = "Unknown"
-        else:
-            result["payment_history"] = "Unknown"
+# Payment history - grab Total amounts from table
+# Find all amounts with currency in billing page
+all_amounts = re.findall(r'((?:INR|USD|EUR|GBP|BRL|MXN|ARS|COP|CLP|PEN|SGD|MYR|THB|PHP|IDR|NGN|ZAR|EGP|SAR|AED)\s*[\d,]+(?:\.\d{1,2})?|[₹$€£¥]\s*[\d,]+(?:\.\d{1,2})?)', html3)
+
+if all_amounts:
+    seen = []
+    clean = []
+    for a in all_amounts:
+        a = a.strip()
+        if a not in seen:
+            seen.append(a)
+            clean.append(a)
+    # Skip first (upcoming plan price) take next 3
+    result["payment_history"] = ", ".join(clean[1:4]) if len(clean) > 1 else clean[0] if clean else "Unknown"
+else:
+    result["payment_history"] = "Unknown"
 
         # Extra members
         m = re.search(r'"extraMemberCount"\s*:\s*(\d+)', html)
